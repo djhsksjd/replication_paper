@@ -10,8 +10,8 @@ import seaborn as sns
 import os  # 新增：用于创建文件夹
 
 
-# 新增：创建.result文件夹（如果不存在）
-os.makedirs(".result", exist_ok=True)
+# 新增：创建result文件夹（如果不存在）
+os.makedirs("result", exist_ok=True)
 
 # 指定设备（GPU 或 CPU）
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
