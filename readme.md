@@ -13,3 +13,6 @@
     - code
     - data
 
+# 环境配置
+- pytorch 3+
+- pytorch 2.8
