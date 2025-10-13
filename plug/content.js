@@ -55,29 +55,15 @@ async function translateText(text) {
   }
 }
 
-// 保存单词到单词本
-function saveWordToDictionary(word) {
-  // 先发送保存单词的消息给后台脚本（不包含翻译）
-  chrome.runtime.sendMessage({
-    action: "saveWord",
-    word: word,
-    translation: "点击翻译查看释义"
-  }, (response) => {
-    if (response && response.success) {
-      console.log('单词已自动保存到单词本');
-    }
-  });
-}
-
-// 显示单词弹窗（默认不显示翻译）
-function showWordPopup(x, y, text) {
+// 显示翻译弹窗
+function showTranslation(x, y, text, translation) {
   const tooltip = createTooltip();
   tooltip.innerHTML = `
     <div class="tooltip-header">
       <span class="original-text">${text}</span>
-      <button class="translate-btn" data-word="${text}">翻译</button>
+      <button class="save-btn" data-word="${text}" data-translation="${translation}">+ 单词本</button>
     </div>
-    <div class="translation-text" style="display:none;"></div>
+    <div class="translation-text">${translation}</div>
   `;
   
   // 设置位置
@@ -85,31 +71,30 @@ function showWordPopup(x, y, text) {
   tooltip.style.top = `${y}px`;
   tooltip.style.display = 'block';
   
-  // 添加翻译按钮事件
-  const translateBtn = tooltip.querySelector('.translate-btn');
-  translateBtn.addEventListener('click', async (e) => {
+  // 添加保存按钮事件
+  const saveBtn = tooltip.querySelector('.save-btn');
+  saveBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const word = e.currentTarget.dataset.word;
+    const translation = e.currentTarget.dataset.translation;
     
-    // 显示加载状态
-    const translationElement = tooltip.querySelector('.translation-text');
-    translationElement.textContent = '翻译中...';
-    translationElement.style.display = 'block';
+    // 获取用户选择的分类（这里简化处理，使用默认分类）
+    const category = "默认分类";
     
-    // 翻译单词
-    const translation = await translateText(word);
-    translationElement.textContent = translation;
-    
-    // 更新单词本中的翻译
+    // 发送保存单词的消息给后台脚本
     chrome.runtime.sendMessage({
-      action: "updateWordTranslation",
+      action: "saveWord",
       word: word,
-      translation: translation
+      translation: translation,
+      category: category
+    }, (response) => {
+      if (response && response.success) {
+        saveBtn.textContent = '已保存';
+        saveBtn.disabled = true;
+      } else if (response && response.reason) {
+        alert(response.reason);
+      }
     });
-    
-    // 更改按钮状态
-    translateBtn.textContent = '翻译完成';
-    translateBtn.disabled = true;
   });
 }
 
@@ -122,7 +107,7 @@ function hideTranslation() {
 }
 
 // 监听鼠标选中文本事件
-document.addEventListener('mouseup', (e) => {
+document.addEventListener('mouseup', async (e) => {
   const selection = window.getSelection();
   const text = selection.toString().trim();
   
@@ -131,11 +116,9 @@ document.addEventListener('mouseup', (e) => {
     const x = rect.right + 10;
     const y = rect.top - 10;
     
-    // 1. 自动保存单词到单词本
-    saveWordToDictionary(text);
-    
-    // 2. 显示单词弹窗（但不翻译）
-    showWordPopup(x, y, text);
+    // 翻译选中的文本
+    const translation = await translateText(text);
+    showTranslation(x, y, text, translation);
   }
 });
 
@@ -150,14 +133,13 @@ document.addEventListener('mousedown', (e) => {
 // 监听来自后台的翻译请求
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "translate" && message.text) {
-    // 先保存到单词本
-    saveWordToDictionary(message.text);
-    
-    // 然后显示弹窗
-    const selection = window.getSelection();
-    if (selection.rangeCount > 0) {
-      const rect = selection.getRangeAt(0).getBoundingClientRect();
-      showWordPopup(rect.right + 10, rect.top - 10, message.text);
-    }
+    translateText(message.text).then(translation => {
+      // 显示翻译结果
+      const selection = window.getSelection();
+      if (selection.rangeCount > 0) {
+        const rect = selection.getRangeAt(0).getBoundingClientRect();
+        showTranslation(rect.right + 10, rect.top - 10, message.text, translation);
+      }
+    });
   }
 });
