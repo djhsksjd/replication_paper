@@ -1,0 +1,39 @@
+{
+  "model": {
+    "user_embedding_dim": 32,
+    "item_embedding_dim": 32,
+    "user_fc_layers": [64, 32],
+    "item_fc_layers": [64, 32],
+    "dropout_rate": 0.2,
+    "use_batch_norm": true
+  },
+  "training": {
+    "batch_size": 256,
+    "epochs": 50,
+    "learning_rate": 0.001,
+    "learning_rate_decay_factor": 0.5,
+    "learning_rate_decay_steps": 10000,
+    "early_stopping_patience": 5,
+    "validation_frequency": 1,
+    "loss_function": "binary_crossentropy"
+  },
+  "data": {
+    "num_negatives": 4,
+    "train_ratio": 0.8,
+    "val_ratio": 0.1,
+    "test_ratio": 0.1,
+    "user_features_path": "data/user_features.csv",
+    "item_features_path": "data/item_features.csv",
+    "interactions_path": "data/interactions.csv",
+    "output_dir": "data/processed"
+  },
+  "evaluation": {
+    "k": 10,
+    "metrics": ["recall", "precision", "ndcg"]
+  },
+  "paths": {
+    "model_dir": "models",
+    "logs_dir": "logs",
+    "embeddings_dir": "embeddings"
+  }
+}

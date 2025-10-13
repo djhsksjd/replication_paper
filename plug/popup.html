@@ -5,7 +5,7 @@
   <title>划词翻译与单词本</title>
   <style>
     body {
-      width: 300px;
+      width: 350px;
       padding: 16px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
@@ -23,18 +23,24 @@
       margin-bottom: 8px;
     }
     #wordList {
-      max-height: 200px;
+      max-height: 250px;
       overflow-y: auto;
       border: 1px solid #eee;
       border-radius: 4px;
       padding: 8px;
     }
     .word-item {
-      padding: 6px 0;
+      padding: 10px;
       border-bottom: 1px solid #f5f5f5;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
     }
     .word-item:last-child {
       border-bottom: none;
+    }
+    .word-info {
+      flex: 1;
     }
     .word {
       font-weight: 600;
@@ -43,6 +49,12 @@
     .translation {
       color: #666;
       font-size: 12px;
+      margin-top: 2px;
+    }
+    .category {
+      color: #999;
+      font-size: 11px;
+      margin-top: 2px;
     }
     .empty {
       color: #999;
@@ -57,10 +69,49 @@
       padding: 8px 12px;
       font-size: 14px;
       cursor: pointer;
-      width: 100%;
+      margin-bottom: 8px;
     }
     button:hover {
       background-color: #3367d6;
+    }
+    .delete-btn {
+      background-color: #ea4335;
+      padding: 4px 8px;
+      font-size: 12px;
+      margin-left: 8px;
+    }
+    .delete-btn:hover {
+      background-color: #d33724;
+    }
+    .btn-group {
+      display: flex;
+      gap: 8px;
+    }
+    .btn-group button {
+      flex: 1;
+    }
+    .category-section {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .category-section select {
+      flex: 1;
+      padding: 6px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .category-section input {
+      flex: 1;
+      padding: 6px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .category-section button {
+      padding: 6px 10px;
+      font-size: 12px;
+      margin-bottom: 0;
     }
   </style>
 </head>
@@ -70,18 +121,34 @@
   <div class="section">
     <h2>使用说明</h2>
     <p style="font-size: 12px; color: #666;">
-      在网页中选中任意文本，即可看到翻译结果。点击"+ 单词本"按钮可将单词保存到单词本中。
+      在网页中选中任意文本，点击翻译弹窗中的"+ 单词本"按钮可将单词保存到单词本中。
     </p>
   </div>
   
   <div class="section">
-    <h2>我的单词本</h2>
+    <h2>单词分类</h2>
+    <div class="category-section">
+      <select id="categoryFilter">
+        <option value="all">所有分类</option>
+      </select>
+    </div>
+    <div class="category-section">
+      <input type="text" id="newCategory" placeholder="输入新分类名称">
+      <button id="addCategoryBtn">添加分类</button>
+    </div>
+  </div>
+  
+  <div class="section">
+    <h2>单词列表</h2>
     <div id="wordList">
       <div class="empty">暂无保存的单词</div>
     </div>
   </div>
   
-  <button id="clearBtn">清空单词本</button>
+  <div class="btn-group">
+    <button id="exportBtn">导出单词</button>
+    <button id="clearBtn">清空单词本</button>
+  </div>
   
   <script src="popup.js"></script>
 </body>
