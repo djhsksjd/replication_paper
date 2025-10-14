@@ -25,3 +25,6 @@ pip install seaborn
 - matplotlib 作用：用于绘制图表、可视化数据
 pip install matplotlib
 
+<div align = "center">
+  <img src="basic_ml_algorithm.png" width="60%">
+</div>
