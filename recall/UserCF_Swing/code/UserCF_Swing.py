@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple, Optional
 import time
 import pickle 
 from datetime import datetime
+import copy
 
 
 # ----------------------
@@ -18,7 +19,7 @@ class DataGenerator:
         # 设置数据规模参数
         self.num_users = 500        # 用户数量
         self.num_items = 1000       # 物品数量
-        self.num_interactions = 5000 # 交互记录数量
+        self.num_interactions = 15000 # 交互记录数量（增加到15000，平均每用户30个交互）
         
         # 用户特征参数
         self.user_age_range = (18, 65)
@@ -277,11 +278,12 @@ class UserCFSwingRecommender:
         print(f"🔧 物品到用户倒排表构建完成（耗时：{time.time() - start_time:.2f}秒）")
         print(f"🔧 覆盖物品数量：{len(self.item_to_users)}")
     
-    def calculate_user_similarity(self, use_weights: bool = False) -> None:
+    def calculate_user_similarity(self, use_weights: bool = False, return_steps: bool = False) -> Optional[Dict]:
         """使用Swing算法计算用户相似度
         
         Args:
             use_weights: 是否使用交互权重（购买>收藏>点击）
+            return_steps: 是否返回详细计算步骤
         """
         if self.item_to_users is None:
             raise ValueError("❌ 未构建物品到用户倒排表")
@@ -289,8 +291,17 @@ class UserCFSwingRecommender:
         start_time = time.time()
         self.user_similarity = defaultdict(dict)
         
+        # 用于存储计算步骤
+        calculation_steps = []
+        example_steps = []  # 存储示例计算步骤（前3个）
+        example_count = 0
+        
         # 遍历每个物品的用户列表
+        total_items = len(self.item_to_users)
+        processed_items = 0
+        
         for item_id, users in self.item_to_users.items():
+            processed_items += 1
             # 获取交互过该物品的用户数量（用于热门惩罚）
             user_count = len(users)
             
@@ -305,6 +316,15 @@ class UserCFSwingRecommender:
                     
                     # 计算贡献值
                     contribution = penalty
+                    step_detail = {
+                        'item_id': item_id,
+                        'user_u': u,
+                        'user_v': v,
+                        'user_count': user_count,
+                        'penalty': round(penalty, 6),
+                        'base_contribution': round(contribution, 6),
+                        'weights': {}
+                    }
                     
                     # 如果使用交互权重，需要获取每个用户对该物品的交互权重
                     if use_weights and self.interaction_df is not None:
@@ -320,9 +340,24 @@ class UserCFSwingRecommender:
                         
                         # 获取交互权重
                         if not u_interaction.empty and not v_interaction.empty:
-                            u_weight = self._get_interaction_weight(u_interaction['interaction_type'].iloc[0])
-                            v_weight = self._get_interaction_weight(v_interaction['interaction_type'].iloc[0])
+                            u_interaction_type = u_interaction['interaction_type'].iloc[0]
+                            v_interaction_type = v_interaction['interaction_type'].iloc[0]
+                            u_weight = self._get_interaction_weight(u_interaction_type)
+                            v_weight = self._get_interaction_weight(v_interaction_type)
                             contribution *= (u_weight * v_weight)
+                            
+                            step_detail['weights'] = {
+                                'user_u': {'type': u_interaction_type, 'weight': u_weight},
+                                'user_v': {'type': v_interaction_type, 'weight': v_weight},
+                                'combined': u_weight * v_weight
+                            }
+                    
+                    step_detail['final_contribution'] = round(contribution, 6)
+                    
+                    # 记录示例步骤（前3个）
+                    if example_count < 3:
+                        example_steps.append(step_detail.copy())
+                        example_count += 1
                     
                     # 累加到用户相似度矩阵
                     if v not in self.user_similarity[u]:
@@ -330,11 +365,59 @@ class UserCFSwingRecommender:
                     if u not in self.user_similarity[v]:
                         self.user_similarity[v][u] = 0.0
                     
+                    old_sim_u_v = self.user_similarity[u][v]
+                    old_sim_v_u = self.user_similarity[v][u]
+                    
                     self.user_similarity[u][v] += contribution
                     self.user_similarity[v][u] += contribution
+                    
+                    step_detail['similarity_before'] = round(old_sim_u_v, 6)
+                    step_detail['similarity_after'] = round(self.user_similarity[u][v], 6)
+                    calculation_steps.append(step_detail)
         
         print(f"🔍 用户相似度计算完成（耗时：{time.time() - start_time:.2f}秒）")
         print(f"🔍 计算了 {len(self.user_similarity)} 个用户的相似度")
+        print(f"🔍 处理了 {total_items} 个物品，共 {len(calculation_steps)} 个用户对")
+        
+        if return_steps:
+            # 转换example_steps中的numpy类型
+            converted_example_steps = []
+            for step in example_steps:
+                converted_step = {
+                    'item_id': int(step['item_id']),
+                    'user_u': int(step['user_u']),
+                    'user_v': int(step['user_v']),
+                    'user_count': int(step['user_count']),
+                    'penalty': float(step['penalty']),
+                    'base_contribution': float(step['base_contribution']),
+                    'final_contribution': float(step['final_contribution']),
+                    'similarity_before': float(step['similarity_before']),
+                    'similarity_after': float(step['similarity_after']),
+                    'weights': {}
+                }
+                if step.get('weights'):
+                    converted_step['weights'] = {
+                        'user_u': {
+                            'type': str(step['weights']['user_u']['type']),
+                            'weight': int(step['weights']['user_u']['weight'])
+                        },
+                        'user_v': {
+                            'type': str(step['weights']['user_v']['type']),
+                            'weight': int(step['weights']['user_v']['weight'])
+                        },
+                        'combined': int(step['weights']['combined'])
+                    }
+                converted_example_steps.append(converted_step)
+            
+            return {
+                'total_items': int(total_items),
+                'total_pairs': int(len(calculation_steps)),
+                'num_users': int(len(self.user_similarity)),
+                'example_steps': converted_example_steps,
+                'time_cost': round(float(time.time() - start_time), 2)
+            }
+        
+        return None
     
     def _get_interaction_weight(self, interaction_type: str) -> int:
         """获取交互类型的权重"""
@@ -396,8 +479,277 @@ class UserCFSwingRecommender:
         # 按分数排序，返回Top-N物品
         return sorted(item_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
     
-    def evaluate(self, test_user_ids: Optional[List[int]] = None, top_n: int = 10) -> Dict[str, float]:
-        """评估推荐系统效果"""
+    def recommend_items_with_reasons_and_steps(self, user_id: int, top_n: int = 10, k_similar_users: int = 50) -> Tuple[List[Tuple[int, float, Dict]], Dict]:
+        """为目标用户推荐物品，并返回推荐原因和详细计算步骤
+        
+        Returns:
+            (recommendations, steps_dict): 推荐列表和计算步骤
+        """
+        if self.user_similarity is None:
+            raise ValueError("❌ 未计算用户相似度")
+        
+        steps = {
+            'user_id': user_id,
+            'steps': []
+        }
+        
+        # 获取用户已交互的物品集合
+        user_items = set()
+        if self.interaction_df is not None:
+            user_items = set(self.interaction_df[self.interaction_df['user_id'] == user_id]['item_id'])
+        
+        steps['steps'].append({
+            'step': 1,
+            'description': f'获取用户 {user_id} 的交互历史',
+            'user_items': [int(item) for item in list(user_items)[:10]],  # 只显示前10个，转换为int
+            'total_items': int(len(user_items))
+        })
+        
+        if not user_items:
+            steps['steps'].append({
+                'step': 2,
+                'description': f'用户 {user_id} 无交互历史，无法推荐',
+                'error': True
+            })
+            return [], steps
+        
+        # 获取目标用户的相似用户（按相似度排序）
+        similar_users = sorted(
+            self.user_similarity.get(user_id, {}).items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:k_similar_users]
+        
+        steps['steps'].append({
+            'step': 2,
+            'description': f'找到 {int(len(similar_users))} 个相似用户',
+            'similar_users': [
+                {'user_id': int(uid), 'similarity': round(float(sim), 4)} 
+                for uid, sim in similar_users[:5]  # 只显示前5个
+            ]
+        })
+        
+        if not similar_users:
+            steps['steps'].append({
+                'step': 3,
+                'description': f'未找到用户 {user_id} 的相似用户',
+                'error': True
+            })
+            return [], steps
+        
+        # 计算候选物品分数，并记录推荐原因
+        item_scores = defaultdict(float)
+        item_reasons = defaultdict(lambda: {'similar_users': []})
+        item_calculation_steps = defaultdict(list)  # 记录每个物品的计算步骤
+        
+        # 获取用户交互过的物品（用于找共同物品）
+        user_item_set = set(user_items)
+        
+        # 预先计算每个相似用户与目标用户的共同物品
+        similar_user_common_items = {}
+        for similar_user, similarity in similar_users:
+            if self.interaction_df is not None:
+                similar_user_items = self.interaction_df[self.interaction_df['user_id'] == similar_user]
+                similar_user_item_set = set(similar_user_items['item_id'])
+                common_items = list(user_item_set & similar_user_item_set)[:5]  # 最多5个共同物品
+                similar_user_common_items[similar_user] = {
+                    'common_items': common_items,
+                    'similarity': similarity
+                }
+        
+        steps['steps'].append({
+            'step': 3,
+            'description': '计算每个相似用户与目标用户的共同物品',
+            'common_items_example': {
+                'similar_user': int(similar_users[0][0]) if similar_users else None,
+                'common_items': [int(item) for item in similar_user_common_items.get(similar_users[0][0], {}).get('common_items', [])[:3]] if similar_users else []
+            }
+        })
+        
+        # 记录计算过程
+        calculation_details = []
+        
+        for similar_user, similarity in similar_users:
+            # 获取相似用户交互过的物品
+            if self.interaction_df is not None:
+                similar_user_items = self.interaction_df[self.interaction_df['user_id'] == similar_user]
+                
+                # 遍历相似用户的物品，计算分数
+                for _, row in similar_user_items.iterrows():
+                    item_id = row['item_id']
+                    # 过滤掉用户已交互的物品
+                    if item_id not in user_items:
+                        # 可以选择加上交互权重
+                        weight = self._get_interaction_weight(row['interaction_type'])
+                        score_contribution = similarity * weight
+                        item_scores[item_id] += score_contribution
+                        
+                        # 记录计算步骤（只记录前几个物品的详细步骤）
+                        if len(calculation_details) < 10:
+                            calculation_details.append({
+                                'item_id': int(item_id),
+                                'similar_user': int(similar_user),
+                                'similarity': round(float(similarity), 4),
+                                'interaction_type': str(row['interaction_type']),
+                                'weight': int(weight),
+                                'contribution': round(float(score_contribution), 4),
+                                'item_score_before': round(float(item_scores[item_id] - score_contribution), 4),
+                                'item_score_after': round(float(item_scores[item_id]), 4)
+                            })
+                        
+                        # 记录推荐原因：哪些相似用户推荐了这个物品（按贡献度排序）
+                        if len(item_reasons[item_id]['similar_users']) < 5:  # 最多记录5个相似用户
+                            contribution = similarity * weight
+                            item_reasons[item_id]['similar_users'].append({
+                                'user_id': similar_user,
+                                'similarity': similarity,
+                                'contribution': contribution,
+                                'interaction_type': row['interaction_type'],
+                                'weight': weight
+                            })
+                            # 按贡献度排序
+                            item_reasons[item_id]['similar_users'].sort(key=lambda x: x['contribution'], reverse=True)
+        
+        steps['steps'].append({
+            'step': 4,
+            'description': f'计算候选物品分数，共 {int(len(item_scores))} 个候选物品',
+            'calculation_example': calculation_details[:5]  # 显示前5个计算示例
+        })
+        
+        # 按分数排序，返回Top-N物品及推荐原因
+        sorted_items = sorted(item_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
+        
+        steps['steps'].append({
+            'step': 5,
+            'description': f'排序并选择 Top-{top_n} 推荐物品',
+            'top_items': [
+                {'item_id': int(item_id), 'score': round(float(score), 4)} 
+                for item_id, score in sorted_items
+            ]
+        })
+        
+        result = []
+        for item_id, score in sorted_items:
+            reason = item_reasons.get(item_id, {'similar_users': []})
+            # 为每个推荐物品添加共同物品信息（从Top相似用户获取）
+            if reason['similar_users']:
+                top_similar_user = reason['similar_users'][0]['user_id']
+                if top_similar_user in similar_user_common_items:
+                    reason['common_items'] = similar_user_common_items[top_similar_user]['common_items']
+                else:
+                    reason['common_items'] = []
+            else:
+                reason['common_items'] = []
+            result.append((item_id, score, reason))
+        
+        return result, steps
+    
+    def recommend_items_with_reasons(self, user_id: int, top_n: int = 10, k_similar_users: int = 50) -> List[Tuple[int, float, Dict]]:
+        """为目标用户推荐物品，并返回推荐原因
+        
+        Args:
+            user_id: 目标用户ID
+            top_n: 推荐物品数量
+            k_similar_users: 参考的相似用户数量
+            
+        Returns:
+            List[Tuple[item_id, score, reason_dict]]: 推荐物品列表，每个元素包含物品ID、分数和推荐原因
+        """
+        if self.user_similarity is None:
+            raise ValueError("❌ 未计算用户相似度")
+        
+        # 获取用户已交互的物品集合
+        user_items = set()
+        if self.interaction_df is not None:
+            user_items = set(self.interaction_df[self.interaction_df['user_id'] == user_id]['item_id'])
+        
+        if not user_items:
+            print(f"⚠️ 用户{user_id}无交互历史，无法推荐")
+            return []
+        
+        # 获取目标用户的相似用户（按相似度排序）
+        similar_users = sorted(
+            self.user_similarity.get(user_id, {}).items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:k_similar_users]
+        
+        if not similar_users:
+            print(f"⚠️ 未找到用户{user_id}的相似用户")
+            return []
+        
+        # 计算候选物品分数，并记录推荐原因
+        item_scores = defaultdict(float)
+        item_reasons = defaultdict(lambda: {'similar_users': []})
+        
+        # 获取用户交互过的物品（用于找共同物品）
+        user_item_set = set(user_items)
+        
+        # 预先计算每个相似用户与目标用户的共同物品
+        similar_user_common_items = {}
+        for similar_user, similarity in similar_users:
+            if self.interaction_df is not None:
+                similar_user_items = self.interaction_df[self.interaction_df['user_id'] == similar_user]
+                similar_user_item_set = set(similar_user_items['item_id'])
+                common_items = list(user_item_set & similar_user_item_set)[:5]  # 最多5个共同物品
+                similar_user_common_items[similar_user] = {
+                    'common_items': common_items,
+                    'similarity': similarity
+                }
+        
+        for similar_user, similarity in similar_users:
+            # 获取相似用户交互过的物品
+            if self.interaction_df is not None:
+                similar_user_items = self.interaction_df[self.interaction_df['user_id'] == similar_user]
+                
+                # 遍历相似用户的物品，计算分数
+                for _, row in similar_user_items.iterrows():
+                    item_id = row['item_id']
+                    # 过滤掉用户已交互的物品
+                    if item_id not in user_items:
+                        # 可以选择加上交互权重
+                        weight = self._get_interaction_weight(row['interaction_type'])
+                        item_scores[item_id] += similarity * weight
+                        
+                        # 记录推荐原因：哪些相似用户推荐了这个物品（按贡献度排序）
+                        if len(item_reasons[item_id]['similar_users']) < 5:  # 最多记录5个相似用户
+                            contribution = similarity * weight
+                            item_reasons[item_id]['similar_users'].append({
+                                'user_id': similar_user,
+                                'similarity': similarity,
+                                'contribution': contribution,
+                                'interaction_type': row['interaction_type'],
+                                'weight': weight
+                            })
+                            # 按贡献度排序
+                            item_reasons[item_id]['similar_users'].sort(key=lambda x: x['contribution'], reverse=True)
+        
+        # 按分数排序，返回Top-N物品及推荐原因
+        sorted_items = sorted(item_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
+        result = []
+        for item_id, score in sorted_items:
+            reason = item_reasons.get(item_id, {'similar_users': []})
+            # 为每个推荐物品添加共同物品信息（从Top相似用户获取）
+            if reason['similar_users']:
+                top_similar_user = reason['similar_users'][0]['user_id']
+                if top_similar_user in similar_user_common_items:
+                    reason['common_items'] = similar_user_common_items[top_similar_user]['common_items']
+                else:
+                    reason['common_items'] = []
+            else:
+                reason['common_items'] = []
+            result.append((item_id, score, reason))
+        
+        return result
+    
+    def evaluate(self, test_user_ids: Optional[List[int]] = None, top_n: int = 10, test_ratio: float = 0.2) -> Dict[str, float]:
+        """评估推荐系统效果
+        
+        Args:
+            test_user_ids: 测试用户ID列表，如果为None则随机选择
+            top_n: 推荐物品数量
+            test_ratio: 每个用户用于测试的交互比例（默认20%作为测试集）
+        """
         if self.user_similarity is None:
             raise ValueError("❌ 未计算用户相似度")
         
@@ -413,32 +765,172 @@ class UserCFSwingRecommender:
         total_recall = 0.0
         total_precision = 0.0
         valid_users = 0
+        no_recommendation_count = 0  # 统计无法生成推荐的用户数
+        
+        # 保存原始interaction_df，用于恢复
+        original_interaction_df = self.interaction_df.copy()
         
         for user_id in test_user_ids:
-            # 真实正样本：用户交互过的物品
-            real_items = set(self.interaction_df[self.interaction_df["user_id"] == user_id]["item_id"])
-            if len(real_items) < 2:
+            # 获取该用户的所有交互
+            user_interactions = self.interaction_df[self.interaction_df["user_id"] == user_id].copy()
+            if len(user_interactions) < 2:
                 continue  # 交互太少，评估无意义
             
-            # 推荐物品：模型输出的候选
-            recommended_items = set([item_id for item_id, _ in self.recommend_items(user_id, top_n)])
-            if not recommended_items:
+            # 按时间排序（如果有时间字段）或随机打乱
+            if 'interaction_time' in user_interactions.columns:
+                user_interactions = user_interactions.sort_values('interaction_time')
+            
+            # 分割训练集和测试集
+            test_size = max(1, int(len(user_interactions) * test_ratio))
+            test_interactions = user_interactions.tail(test_size)
+            train_interactions = user_interactions.head(len(user_interactions) - test_size)
+            
+            # 如果训练集为空，跳过
+            if len(train_interactions) == 0:
                 continue
             
-            # 命中物品：推荐中包含的真实正样本
-            hit_items = recommended_items & real_items
+            # 临时修改interaction_df，只保留训练集交互（用于生成推荐）
+            self.interaction_df = self.interaction_df[
+                ~((self.interaction_df['user_id'] == user_id) & (self.interaction_df['item_id'].isin(test_interactions['item_id'])))
+            ]
+            
+            # 真实正样本：测试集中的物品（用户未来会交互的物品）
+            test_items = set(test_interactions['item_id'])
+            
+            # 推荐物品：基于训练集生成的推荐
+            recommended_items = set([item_id for item_id, _ in self.recommend_items(user_id, top_n)])
+            if not recommended_items:
+                no_recommendation_count += 1
+                # 恢复interaction_df
+                self.interaction_df = original_interaction_df.copy()
+                continue
+            
+            # 命中物品：推荐中包含的测试集物品
+            hit_items = recommended_items & test_items
             valid_users += 1
             
             # 计算召回率和精确率
-            total_recall += len(hit_items) / len(real_items) if real_items else 0.0
+            total_recall += len(hit_items) / len(test_items) if test_items else 0.0
             total_precision += len(hit_items) / len(recommended_items) if recommended_items else 0.0
+            
+            # 恢复interaction_df
+            self.interaction_df = original_interaction_df.copy()
         
         # 返回平均指标
-        return {
+        result = {
             "测试用户数": valid_users,
             "平均召回率": round(total_recall / valid_users, 4) if valid_users else 0.0,
             "平均精确率": round(total_precision / valid_users, 4) if valid_users else 0.0
         }
+        
+        # 添加调试信息
+        if no_recommendation_count > 0:
+            result["无法生成推荐的用户数"] = no_recommendation_count
+        
+        return result
+    
+    def evaluate_with_global_split(self, test_ratio: float = 0.2, top_n: int = 10, min_user_interactions: int = 5) -> Dict[str, float]:
+        """使用全局训练/测试分割评估推荐系统效果（更准确的评估方法）
+        
+        Args:
+            test_ratio: 测试集比例（默认20%）
+            top_n: 推荐物品数量
+            min_user_interactions: 用户最少交互数（低于此值的用户不参与评估）
+        """
+        if self.interaction_df is None:
+            raise ValueError("❌ 未加载交互数据，无法评估")
+        
+        print(f"\n🔄 开始全局训练/测试分割评估（测试集比例：{test_ratio:.0%}）...")
+        start_time = time.time()
+        
+        # 保存原始数据
+        original_interaction_df = self.interaction_df.copy()
+        original_user_similarity = copy.deepcopy(self.user_similarity) if self.user_similarity else None
+        original_item_to_users = copy.deepcopy(self.item_to_users) if self.item_to_users else None
+        
+        # 全局分割：按时间排序后分割
+        if 'interaction_time' in self.interaction_df.columns:
+            self.interaction_df = self.interaction_df.sort_values('interaction_time')
+        else:
+            # 如果没有时间字段，随机打乱
+            self.interaction_df = self.interaction_df.sample(frac=1, random_state=42).reset_index(drop=True)
+        
+        # 计算分割点
+        split_idx = int(len(self.interaction_df) * (1 - test_ratio))
+        train_df = self.interaction_df.iloc[:split_idx].copy()
+        test_df = self.interaction_df.iloc[split_idx:].copy()
+        
+        print(f"📊 训练集：{len(train_df)}条交互，测试集：{len(test_df)}条交互")
+        
+        # 使用训练集重新构建相似度矩阵
+        print("🔄 基于训练集重新计算用户相似度...")
+        self.interaction_df = train_df
+        self._build_item_to_users()
+        self.calculate_user_similarity(use_weights=True)
+        
+        # 获取测试集中的用户（至少有min_user_interactions个交互）
+        test_users = test_df['user_id'].value_counts()
+        test_users = test_users[test_users >= min_user_interactions].index.tolist()
+        
+        print(f"📊 测试用户数：{len(test_users)}（至少{min_user_interactions}个交互）")
+        
+        # 评估每个测试用户
+        total_recall = 0.0
+        total_precision = 0.0
+        total_hits = 0
+        valid_users = 0
+        no_recommendation_count = 0
+        
+        for user_id in test_users:
+            # 该用户在测试集中的真实交互物品
+            test_items = set(test_df[test_df['user_id'] == user_id]['item_id'])
+            
+            # 该用户在训练集中的交互物品（用于过滤推荐）
+            train_items = set(train_df[train_df['user_id'] == user_id]['item_id'])
+            
+            # 如果训练集中没有交互，跳过（冷启动问题）
+            if len(train_items) == 0:
+                continue
+            
+            # 生成推荐（基于训练集）
+            recommended_items = set([item_id for item_id, _ in self.recommend_items(user_id, top_n)])
+            
+            if not recommended_items:
+                no_recommendation_count += 1
+                continue
+            
+            # 计算命中
+            hit_items = recommended_items & test_items
+            valid_users += 1
+            total_hits += len(hit_items)
+            
+            # 计算召回率和精确率
+            total_recall += len(hit_items) / len(test_items) if test_items else 0.0
+            total_precision += len(hit_items) / len(recommended_items) if recommended_items else 0.0
+        
+        # 计算平均指标
+        avg_recall = round(total_recall / valid_users, 4) if valid_users > 0 else 0.0
+        avg_precision = round(total_precision / valid_users, 4) if valid_users > 0 else 0.0
+        
+        result = {
+            "测试用户数": valid_users,
+            "平均召回率": avg_recall,
+            "平均精确率": avg_precision,
+            "总命中数": total_hits,
+            "评估耗时": f"{time.time() - start_time:.2f}秒"
+        }
+        
+        if no_recommendation_count > 0:
+            result["无法生成推荐的用户数"] = no_recommendation_count
+        
+        print(f"✅ 评估完成（耗时：{time.time() - start_time:.2f}秒）")
+        
+        # 恢复原始数据（在返回前恢复）
+        self.interaction_df = original_interaction_df
+        self.user_similarity = original_user_similarity
+        self.item_to_users = original_item_to_users
+        
+        return result
     
     def print_similar_users(self, user_id: int, top_k: int = 5) -> None:
         """打印用户的相似用户"""
@@ -488,19 +980,55 @@ class UserCFSwingRecommender:
         else:
             print("  - 交互数据未加载")
         
-        # 2. 打印推荐结果
-        recommendations = self.recommend_items(user_id, top_n)
+        # 2. 打印推荐结果（带推荐原因）
+        recommendations = self.recommend_items_with_reasons(user_id, top_n)
         print(f"\n🎯 为用户{user_id}推荐的Top{top_n}物品：")
         if not recommendations:
             print("  - 无推荐物品")
         else:
-            for i, (item_id, score) in enumerate(recommendations, 1):
+            for i, (item_id, score, reason) in enumerate(recommendations, 1):
                 item_info = self.item_df[self.item_df['item_id'] == item_id]
                 item_name = item_info['item_name'].iloc[0] if not item_info.empty else f"物品{item_id}"
                 item_category = item_info['category'].iloc[0] if not item_info.empty else '未知'
                 item_price = item_info['price'].iloc[0] if not item_info.empty else '未知'
-                print(f"  {i}. {item_name}（ID：{item_id}）")
-                print(f"     - 推荐分数：{score:.4f} | 类别：{item_category} | 价格：¥{item_price}")
+                
+                print(f"\n  {i}. {item_name}（ID：{item_id}）")
+                print(f"     📊 推荐分数：{score:.4f} | 类别：{item_category} | 价格：¥{item_price}")
+                
+                # 显示推荐原因
+                if reason['similar_users']:
+                    print(f"     💡 推荐原因：")
+                    # 显示Top 3相似用户
+                    top_similar_users = reason['similar_users'][:3]
+                    for j, sim_user_info in enumerate(top_similar_users, 1):
+                        sim_user_id = sim_user_info['user_id']
+                        sim_similarity = sim_user_info['similarity']
+                        sim_interaction = sim_user_info['interaction_type']
+                        sim_contribution = sim_user_info['contribution']
+                        
+                        # 获取相似用户信息
+                        sim_user_data = self.user_df[self.user_df['user_id'] == sim_user_id]
+                        sim_age = sim_user_data['age'].iloc[0] if not sim_user_data.empty else '未知'
+                        sim_gender = sim_user_data['gender'].iloc[0] if not sim_user_data.empty else '未知'
+                        
+                        print(f"        {j}. 用户{sim_user_id}（{sim_gender}，{sim_age}岁）")
+                        print(f"           - 相似度：{sim_similarity:.4f} | 对该物品：{sim_interaction} | 贡献度：{sim_contribution:.4f}")
+                    
+                    # 显示共同交互的物品（解释为什么相似）
+                    if reason.get('common_items'):
+                        common_items = reason['common_items'][:3]  # 最多显示3个
+                        if common_items:
+                            common_item_names = []
+                            for common_item_id in common_items:
+                                common_item_info = self.item_df[self.item_df['item_id'] == common_item_id]
+                                if not common_item_info.empty:
+                                    common_item_name = common_item_info['item_name'].iloc[0]
+                                    common_item_names.append(common_item_name)
+                            
+                            if common_item_names:
+                                print(f"        🔗 与Top相似用户共同喜欢：{', '.join(common_item_names)}")
+                else:
+                    print(f"     💡 推荐原因：基于协同过滤算法推荐")
     
     def save_params(self) -> None:
         """持久化保存推荐器的关键参数"""
@@ -615,11 +1143,28 @@ def main():
         # 打印推荐结果
         recommender.print_recommendations(sample_user_id, top_n=5)
         
-        # 评估推荐效果
+        # 评估推荐效果（使用改进的全局分割方法）
         if recommender.interaction_df is not None:
-            eval_results = recommender.evaluate(top_n=5)
-            print(f"\n📊 推荐系统评估结果（Top5推荐）：")
+            print("\n" + "="*60)
+            print("📊 推荐系统评估（全局训练/测试分割）")
+            print("="*60)
+            eval_results = recommender.evaluate_with_global_split(
+                test_ratio=0.2,  # 20%作为测试集
+                top_n=10,  # 推荐Top10物品（增加推荐数量提高命中率）
+                min_user_interactions=5  # 至少5个交互的用户才参与评估
+            )
             for metric, value in eval_results.items():
+                print(f"  - {metric}：{value}")
+            
+            # 同时运行原来的评估方法作为对比
+            print("\n" + "="*60)
+            print("📊 推荐系统评估（按用户分割）")
+            print("="*60)
+            eval_results_old = recommender.evaluate(
+                top_n=10,  # 增加推荐数量
+                test_ratio=0.1  # 降低测试比例到10%，增加训练数据
+            )
+            for metric, value in eval_results_old.items():
                 print(f"  - {metric}：{value}")
     
     except Exception as e:

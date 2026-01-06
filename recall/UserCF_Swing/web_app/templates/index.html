@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UserCF Swing 推荐系统可视化</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <header class="header">
+            <h1><i class="fas fa-brain"></i> UserCF Swing 推荐系统</h1>
+            <p class="subtitle">基于用户协同过滤的智能推荐算法可视化平台</p>
+        </header>
+
+        <!-- 算法流程步骤 -->
+        <div class="steps-container">
+            <div class="step" id="step1" data-step="1">
+                <div class="step-icon"><i class="fas fa-database"></i></div>
+                <div class="step-content">
+                    <h3>步骤 1: 数据加载</h3>
+                    <p>加载用户、物品和交互数据</p>
+                    <div class="step-status" id="status1">等待开始</div>
+                    <div class="step-details" id="details1"></div>
+                </div>
+            </div>
+
+            <div class="step" id="step2" data-step="2">
+                <div class="step-icon"><i class="fas fa-calculator"></i></div>
+                <div class="step-content">
+                    <h3>步骤 2: 相似度计算</h3>
+                    <p>使用Swing算法计算用户相似度矩阵</p>
+                    <div class="step-status" id="status2">等待开始</div>
+                    <div class="step-details" id="details2"></div>
+                </div>
+            </div>
+
+            <div class="step" id="step3" data-step="3">
+                <div class="step-icon"><i class="fas fa-user"></i></div>
+                <div class="step-content">
+                    <h3>步骤 3: 用户选择</h3>
+                    <p>选择目标用户查看推荐</p>
+                    <div class="step-status" id="status3">等待开始</div>
+                    <div class="user-selector" id="userSelector">
+                        <select id="userIdSelect" class="select-input">
+                            <option value="">请选择用户...</option>
+                        </select>
+                        <button class="btn btn-primary" onclick="loadUserData()">
+                            <i class="fas fa-search"></i> 加载用户数据
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="step" id="step4" data-step="4">
+                <div class="step-icon"><i class="fas fa-star"></i></div>
+                <div class="step-content">
+                    <h3>步骤 4: 推荐生成</h3>
+                    <p>基于相似用户生成个性化推荐</p>
+                    <div class="step-status" id="status4">等待开始</div>
+                    <button class="btn btn-primary" onclick="generateRecommendations()" id="recommendBtn" disabled>
+                        <i class="fas fa-magic"></i> 生成推荐
+                    </button>
+                </div>
+            </div>
+
+            <div class="step" id="step5" data-step="5">
+                <div class="step-icon"><i class="fas fa-chart-line"></i></div>
+                <div class="step-content">
+                    <h3>步骤 5: 系统评估</h3>
+                    <p>评估推荐系统的效果指标</p>
+                    <div class="step-status" id="status5">等待开始</div>
+                    <button class="btn btn-secondary" onclick="evaluateSystem()" id="evaluateBtn" disabled>
+                        <i class="fas fa-chart-bar"></i> 开始评估
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 控制面板 -->
+        <div class="control-panel">
+            <button class="btn btn-success" onclick="initSystem()">
+                <i class="fas fa-play"></i> 初始化系统
+            </button>
+            <button class="btn btn-info" onclick="calculateSimilarity()" id="calcSimBtn" disabled>
+                <i class="fas fa-cogs"></i> 计算相似度
+            </button>
+            <button class="btn btn-warning" onclick="resetSystem()">
+                <i class="fas fa-redo"></i> 重置系统
+            </button>
+        </div>
+
+        <!-- 数据统计面板 -->
+        <div class="stats-panel" id="statsPanel" style="display: none;">
+            <h2><i class="fas fa-chart-pie"></i> 数据统计</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="fas fa-users"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="statUsers">0</div>
+                        <div class="stat-label">用户数</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="fas fa-box"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="statItems">0</div>
+                        <div class="stat-label">物品数</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="fas fa-exchange-alt"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="statInteractions">0</div>
+                        <div class="stat-label">交互记录</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="fas fa-chart-bar"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="statAvgInteractions">0</div>
+                        <div class="stat-label">平均交互数</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 用户信息面板 -->
+        <div class="user-panel" id="userPanel" style="display: none;">
+            <h2><i class="fas fa-user-circle"></i> 用户信息</h2>
+            <div class="user-info" id="userInfo"></div>
+            
+            <h3><i class="fas fa-history"></i> 交互历史</h3>
+            <div class="interactions-list" id="interactionsList"></div>
+            
+            <h3><i class="fas fa-user-friends"></i> 相似用户</h3>
+            <div class="similar-users-list" id="similarUsersList"></div>
+        </div>
+
+        <!-- 推荐结果面板 -->
+        <div class="recommendations-panel" id="recommendationsPanel" style="display: none;">
+            <h2><i class="fas fa-gift"></i> 推荐结果</h2>
+            <div class="recommendations-grid" id="recommendationsGrid"></div>
+        </div>
+
+        <!-- 评估结果面板 -->
+        <div class="evaluation-panel" id="evaluationPanel" style="display: none;">
+            <h2><i class="fas fa-clipboard-check"></i> 评估结果</h2>
+            <div class="evaluation-results" id="evaluationResults"></div>
+        </div>
+
+        <!-- 计算步骤面板 -->
+        <div class="calculation-steps-panel" id="calculationStepsPanel" style="display: none;">
+            <h2><i class="fas fa-calculator"></i> 计算步骤详解</h2>
+            <div class="calculation-steps" id="calculationSteps"></div>
+        </div>
+
+        <!-- 算法说明 -->
+        <div class="algorithm-info">
+            <h2><i class="fas fa-info-circle"></i> 算法说明</h2>
+            <div class="info-content">
+                <h3>UserCF Swing 算法流程</h3>
+                <ol>
+                    <li><strong>数据加载：</strong>加载用户、物品和交互数据，构建数据基础</li>
+                    <li><strong>相似度计算：</strong>使用Swing算法计算用户相似度，通过热门物品惩罚机制提高准确性</li>
+                    <li><strong>用户选择：</strong>选择目标用户，查看其交互历史和相似用户</li>
+                    <li><strong>推荐生成：</strong>基于相似用户的偏好，为目标用户生成个性化推荐</li>
+                    <li><strong>系统评估：</strong>使用召回率、精确率等指标评估推荐效果</li>
+                </ol>
+                <h3>Swing算法特点</h3>
+                <ul>
+                    <li>通过热门物品惩罚机制，减少热门物品对相似度计算的干扰</li>
+                    <li>更关注小众物品的共同交互，提高相似度计算的准确性</li>
+                    <li>适合数据稀疏场景，能够发现用户真实兴趣偏好</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
+
